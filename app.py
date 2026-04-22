@@ -1,3 +1,4 @@
+from lora_ft_webui import get_default_lora_config, scan_lora_checkpoints
 import os
 import re
 import sys
@@ -235,11 +236,16 @@ class VoxCPMDemo:
         self.voxcpm_model: Optional[voxcpm.VoxCPM] = None
         self._model_id = model_id
 
-    def get_or_load_voxcpm(self) -> voxcpm.VoxCPM:
-        if self.voxcpm_model is not None:
+        self.optimize = True  # Default to optimized loading; can be toggled in UI
+
+    def get_or_load_voxcpm(self, optimization: bool = True) -> voxcpm.VoxCPM:
+        if self.voxcpm_model is not None and self.optimize == optimization:
             return self.voxcpm_model
         logger.info(f"Loading model: {self._model_id}")
-        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(self._model_id, optimize=True)
+        lora_config = get_default_lora_config()
+
+        self.optimize = optimization
+        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(self._model_id, optimize=self.optimize, lora_config=lora_config)
         logger.info("Model loaded successfully.")
         return self.voxcpm_model
 
@@ -277,6 +283,8 @@ class VoxCPMDemo:
         self,
         text_input: str,
         control_instruction: str = "",
+        lora_selection: Optional[str] = None,
+        optimization: bool = True,
         reference_wav_path_input: Optional[str] = None,
         prompt_text: str = "",
         cfg_value_input: float = 2.0,
@@ -284,8 +292,24 @@ class VoxCPMDemo:
         denoise: bool = True,
         inference_timesteps: int = 10,
     ) -> Tuple[int, np.ndarray]:
-        current_model = self.get_or_load_voxcpm()
+        current_model = self.get_or_load_voxcpm(optimization=optimization)
 
+        # Handle LoRA hot-swapping
+        assert current_model is not None, "Model must be loaded before inference"
+        if lora_selection and lora_selection != "None":
+            full_lora_path = os.path.join("lora", lora_selection)
+            print(f"Hot-loading LoRA: {full_lora_path}", file=sys.stderr)
+            try:
+                current_model.load_lora(full_lora_path)
+                current_model.set_lora_enabled(True)
+            except Exception as e:
+                print(f"Error loading LoRA: {e}", file=sys.stderr)
+                exit(1)
+        else:
+            print("Disabling LoRA", file=sys.stderr)
+            current_model.set_lora_enabled(False)
+
+        # Process text and control inputs
         text = (text_input or "").strip()
         if len(text) == 0:
             raise ValueError("Please input text to synthesize.")
@@ -328,6 +352,8 @@ def create_demo_interface(demo: VoxCPMDemo):
     def _generate(
         text: str,
         control_instruction: str,
+        lora_selection: Optional[str],
+        optimization: bool,
         ref_wav: Optional[str],
         use_prompt_text: bool,
         prompt_text_value: str,
@@ -341,6 +367,8 @@ def create_demo_interface(demo: VoxCPMDemo):
         sr, wav_np = demo.generate_tts_audio(
             text_input=text,
             control_instruction=actual_control,
+            lora_selection=lora_selection,
+            optimization=optimization,
             reference_wav_path_input=ref_wav,
             prompt_text=actual_prompt_text,
             cfg_value_input=cfg_value,
@@ -386,6 +414,16 @@ def create_demo_interface(demo: VoxCPMDemo):
 
         with gr.Row():
             with gr.Column():
+                lora_select = gr.Dropdown(
+                    label="Model LoRA (optional)",
+                    choices=["None"] + scan_lora_checkpoints(),
+                    value="None",
+                    interactive=True,
+                    elem_classes="input-field"
+                )
+                optimization = gr.Checkbox(
+                    label="Enable Triton (if supported)",
+                    value=True)
                 reference_wav = gr.Audio(
                     sources=["upload", "microphone"],
                     type="filepath",
@@ -440,7 +478,7 @@ def create_demo_interface(demo: VoxCPMDemo):
                     dit_steps = gr.Slider(
                         minimum=1,
                         maximum=50,
-                        value=10,
+                        value=20,
                         step=1,
                         label=I18N("dit_steps_label"),
                         info=I18N("dit_steps_info"),
@@ -462,11 +500,20 @@ def create_demo_interface(demo: VoxCPMDemo):
             outputs=[prompt_text],
         )
 
+        # Recognize new reference audio when uploaded (if Ultimate Cloning Mode is enabled)
+        reference_wav.change(
+            fn=_run_asr_if_needed,
+            inputs=[show_prompt_text, reference_wav],
+            outputs=[prompt_text],
+        )
+
         run_btn.click(
             fn=_generate,
             inputs=[
                 text,
                 control_instruction,
+                lora_select,
+                optimization,
                 reference_wav,
                 show_prompt_text,
                 prompt_text,
@@ -482,8 +529,9 @@ def create_demo_interface(demo: VoxCPMDemo):
 
     return interface
 
+
 def run_demo(
-    server_name: str = "0.0.0.0",
+    server_name: str = "127.0.0.1",
     server_port: int = 8808,
     show_error: bool = True,
     model_id: str = "openbmb/VoxCPM2",
