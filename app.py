@@ -291,6 +291,7 @@ class VoxCPMDemo:
         do_normalize: bool = True,
         denoise: bool = True,
         inference_timesteps: int = 10,
+        random_seed: int = -1,
     ) -> Tuple[int, np.ndarray]:
         current_model = self.get_or_load_voxcpm(optimization=optimization)
 
@@ -340,6 +341,11 @@ class VoxCPMDemo:
             denoise=denoise,
             inference_timesteps=inference_timesteps,
         )
+
+        if random_seed != -1:
+            torch.manual_seed(random_seed)
+            np.random.seed(random_seed)
+
         wav = current_model.generate(**generate_kwargs)
         return (current_model.tts_model.sample_rate, wav)
 
@@ -361,6 +367,7 @@ def create_demo_interface(demo: VoxCPMDemo):
         do_normalize: bool,
         denoise: bool,
         dit_steps: int,
+        random_seed: int,
     ):
         actual_prompt_text = prompt_text_value.strip() if use_prompt_text else ""
         actual_control = "" if use_prompt_text else control_instruction
@@ -375,6 +382,7 @@ def create_demo_interface(demo: VoxCPMDemo):
             do_normalize=do_normalize,
             denoise=denoise,
             inference_timesteps=int(dit_steps),
+            random_seed=random_seed
         )
         return (sr, wav_np)
 
@@ -483,6 +491,12 @@ def create_demo_interface(demo: VoxCPMDemo):
                         label=I18N("dit_steps_label"),
                         info=I18N("dit_steps_info"),
                     )
+                    random_seed = gr.Number(
+                        value=-1,
+                        precision=0,
+                        elem_classes="input-field",
+                        label="Random Seed",
+                    )
 
                 run_btn = gr.Button(I18N("generate_btn"), variant="primary", size="lg")
 
@@ -521,6 +535,7 @@ def create_demo_interface(demo: VoxCPMDemo):
                 DoNormalizeText,
                 DoDenoisePromptAudio,
                 dit_steps,
+                random_seed
             ],
             outputs=[audio_output],
             show_progress=True,
