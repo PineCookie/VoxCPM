@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 import json
@@ -95,6 +96,8 @@ current_model: Optional[VoxCPM] = None
 asr_model: Optional[AutoModel] = None
 training_process: Optional[subprocess.Popen] = None
 training_log = ""
+lora_config: Optional[LoRAConfig] = None
+base_model_path: Optional[str] = None
 
 
 def get_timestamp_str():
@@ -218,11 +221,12 @@ def get_default_lora_config():
     )
 
 
-def load_model(pretrained_path, lora_selection: Optional[str] = None):
+def load_model(lora_selection: Optional[str] = None):
     global current_model
-    print(f"Loading model from {pretrained_path}...", file=sys.stderr)
+    global lora_config
+    global base_model_path
+    print(f"Loading model from {base_model_path}...", file=sys.stderr)
 
-    lora_config = None
     lora_weights_path = None
 
     if lora_selection and lora_selection != "None":
@@ -241,49 +245,66 @@ def load_model(pretrained_path, lora_selection: Optional[str] = None):
     # Always init with a default LoRA config to allow hot-swapping later
     if lora_config is None:
         lora_config = get_default_lora_config()
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if current_model is not None:
+        # Unload current model from VRAM before loading new one
+        del current_model
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     current_model = VoxCPM.from_pretrained(
-        hf_model_id=pretrained_path,
+        hf_model_id=base_model_path,
         load_denoiser=False,
         optimize=False,
         lora_config=lora_config,
         lora_weights_path=lora_weights_path,
+        device=device,
     )
     return "Model loaded successfully!"
 
 
+def read_lora_config(lora_config_file, key):
+    if os.path.exists(lora_config_file):
+        try:
+            with open(lora_config_file, "r", encoding="utf-8") as f:
+                lora_info = json.load(f)
+            return lora_info.get(key, None)
+        except Exception as e:
+            print(f"Warning: Failed to read base_model from LoRA config: {e}", file=sys.stderr)
+            return None
+
+
+def base_model_for_lora(pretrained_path, lora_selection):
+    # 优先使用用户指定的预训练模型路径
+    new_model_path = pretrained_path if pretrained_path and pretrained_path.strip() else default_pretrained_path
+
+    # 如果选择了 LoRA，尝试从其 config 读取 base_model
+    if lora_selection and lora_selection != "None":
+        full_lora_path = os.path.join("lora", lora_selection)
+        lora_config_file = os.path.join(full_lora_path, "lora_config.json")
+        saved_base_model = read_lora_config(lora_config_file, "base_model")
+        if saved_base_model and os.path.exists(saved_base_model):
+            new_model_path = saved_base_model
+            print(f"Using base model from LoRA config: {new_model_path}", file=sys.stderr)
+        else:
+            print(f"Falling back to default or user-specified base model: {new_model_path}", file=sys.stderr)
+    return new_model_path
+
+
 def run_inference(text, prompt_wav, prompt_text, lora_selection, cfg_scale, steps, seed, pretrained_path=None):
+    global current_model
+    global lora_config
+    global base_model_path
     # 如果选择了 LoRA 模型且当前模型未加载，尝试从 LoRA config 读取 base_model
     if current_model is None:
-        # 优先使用用户指定的预训练模型路径
-        base_model_path = pretrained_path if pretrained_path and pretrained_path.strip() else default_pretrained_path
-
-        # 如果选择了 LoRA，尝试从其 config 读取 base_model
-        if lora_selection and lora_selection != "None":
-            full_lora_path = os.path.join("lora", lora_selection)
-            lora_config_file = os.path.join(full_lora_path, "lora_config.json")
-
-            if os.path.exists(lora_config_file):
-                try:
-                    with open(lora_config_file, "r", encoding="utf-8") as f:
-                        lora_info = json.load(f)
-                    saved_base_model = lora_info.get("base_model")
-
-                    if saved_base_model:
-                        # 优先使用保存的 base_model 路径
-                        if os.path.exists(saved_base_model):
-                            base_model_path = saved_base_model
-                            print(f"Using base model from LoRA config: {base_model_path}", file=sys.stderr)
-                        else:
-                            print(f"Warning: Saved base_model path not found: {saved_base_model}", file=sys.stderr)
-                            print(f"Falling back to default: {base_model_path}", file=sys.stderr)
-                except Exception as e:
-                    print(f"Warning: Failed to read base_model from LoRA config: {e}", file=sys.stderr)
-
+        base_model_path = base_model_for_lora(pretrained_path, lora_selection)
         # 加载模型
         try:
             print(f"Loading base model: {base_model_path}", file=sys.stderr)
-            load_model(base_model_path, lora_selection)
+            load_model(lora_selection)
             if lora_selection and lora_selection != "None":
                 print(f"Model loaded for LoRA: {lora_selection}", file=sys.stderr)
         except Exception as e:
@@ -295,7 +316,15 @@ def run_inference(text, prompt_wav, prompt_text, lora_selection, cfg_scale, step
     assert current_model is not None, "Model must be loaded before inference"
     if lora_selection and lora_selection != "None":
         full_lora_path = os.path.join("lora", lora_selection)
+        current_lora_config, _ = load_lora_config_from_checkpoint(full_lora_path)
+        new_model_path = base_model_for_lora(pretrained_path, lora_selection)
+
         print(f"Hot-loading LoRA: {full_lora_path}", file=sys.stderr)
+        if new_model_path != base_model_path or (current_lora_config and current_lora_config != lora_config):
+            print(f"Reloading model from {new_model_path}...", file=sys.stderr)
+            base_model_path = new_model_path
+            load_model(lora_selection)
+
         try:
             current_model.load_lora(full_lora_path)
             current_model.set_lora_enabled(True)

@@ -310,8 +310,8 @@ class VoxCPMDemo:
         if lora_selection and lora_selection != "None":
             full_lora_path = os.path.join("lora", lora_selection)
             lora_config, _ = load_lora_config_from_checkpoint(full_lora_path)
-            print(f"Hot-loading LoRA: {full_lora_path}", file=sys.stderr)
 
+            print(f"Hot-loading LoRA: {full_lora_path}", file=sys.stderr)
             current_model = self.get_or_load_voxcpm(optimization=optimization, lora_config=lora_config)
             try:
                 current_model.load_lora(full_lora_path)
