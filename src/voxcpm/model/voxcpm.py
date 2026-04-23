@@ -104,6 +104,21 @@ class LoRAConfig(BaseModel):
     # Projection layer attribute names to find on VoxCPMModel
     target_proj_modules: list[str] = ["enc_to_lm_proj", "lm_to_dit_proj", "res_to_dit_proj"]
 
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, LoRAConfig):
+            return NotImplemented
+        return (
+            self.enable_lm == value.enable_lm
+            and self.enable_dit == value.enable_dit
+            and self.enable_proj == value.enable_proj
+            and self.r == value.r
+            and self.alpha == value.alpha
+            and self.dropout == value.dropout
+            and self.target_modules_lm == value.target_modules_lm
+            and self.target_modules_dit == value.target_modules_dit
+            and self.target_proj_modules == value.target_proj_modules
+        )
+
 
 VoxCPMConfig.model_rebuild()
 

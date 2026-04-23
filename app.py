@@ -1,14 +1,17 @@
-from lora_ft_webui import get_default_lora_config, scan_lora_checkpoints
+from lora_ft_webui import get_default_lora_config, load_lora_config_from_checkpoint, scan_lora_checkpoints
 import os
 import re
 import sys
 import logging
+import gc
 import numpy as np
 import torch
 import gradio as gr
 from typing import Optional, Tuple
 from funasr import AutoModel
 from pathlib import Path
+
+from voxcpm.model.voxcpm import LoRAConfig
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -237,15 +240,24 @@ class VoxCPMDemo:
         self._model_id = model_id
 
         self.optimize = True  # Default to optimized loading; can be toggled in UI
+        self.lora_config = get_default_lora_config() # Default LoRA config for hot-swapping support
 
-    def get_or_load_voxcpm(self, optimization: bool = True) -> voxcpm.VoxCPM:
-        if self.voxcpm_model is not None and self.optimize == optimization:
+    def get_or_load_voxcpm(self, optimization: bool = True, lora_config: Optional[LoRAConfig] = None) -> voxcpm.VoxCPM:
+        if self.voxcpm_model is not None and self.optimize == optimization and (lora_config is None or self.lora_config == lora_config):
             return self.voxcpm_model
-        logger.info(f"Loading model: {self._model_id}")
-        lora_config = get_default_lora_config()
+        
+        # Unload old model from VRAM before reloading
+        if self.voxcpm_model is not None:
+            del self.voxcpm_model
+            gc.collect()
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+        
+        print(f"(Re-)loading model: {self._model_id}")
 
         self.optimize = optimization
-        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(self._model_id, optimize=self.optimize, lora_config=lora_config)
+        self.lora_config = lora_config
+        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(self._model_id, optimize=self.optimize, lora_config=self.lora_config)
         logger.info("Model loaded successfully.")
         return self.voxcpm_model
 
@@ -293,13 +305,14 @@ class VoxCPMDemo:
         inference_timesteps: int = 10,
         random_seed: int = -1,
     ) -> Tuple[int, np.ndarray]:
-        current_model = self.get_or_load_voxcpm(optimization=optimization)
-
+        
         # Handle LoRA hot-swapping
-        assert current_model is not None, "Model must be loaded before inference"
         if lora_selection and lora_selection != "None":
             full_lora_path = os.path.join("lora", lora_selection)
+            lora_config, _ = load_lora_config_from_checkpoint(full_lora_path)
             print(f"Hot-loading LoRA: {full_lora_path}", file=sys.stderr)
+
+            current_model = self.get_or_load_voxcpm(optimization=optimization, lora_config=lora_config)
             try:
                 current_model.load_lora(full_lora_path)
                 current_model.set_lora_enabled(True)
@@ -308,6 +321,7 @@ class VoxCPMDemo:
                 exit(1)
         else:
             print("Disabling LoRA", file=sys.stderr)
+            current_model = self.get_or_load_voxcpm(optimization=optimization)
             current_model.set_lora_enabled(False)
 
         # Process text and control inputs
