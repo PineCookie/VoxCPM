@@ -218,15 +218,15 @@ def get_default_lora_config():
     )
 
 
-def load_model(pretrained_path, lora_path=None):
+def load_model(pretrained_path, lora_selection: Optional[str] = None):
     global current_model
     print(f"Loading model from {pretrained_path}...", file=sys.stderr)
 
     lora_config = None
     lora_weights_path = None
 
-    if lora_path:
-        full_lora_path = os.path.join("lora", lora_path)
+    if lora_selection and lora_selection != "None":
+        full_lora_path = os.path.join("lora", lora_selection)
         if os.path.exists(full_lora_path):
             lora_weights_path = full_lora_path
             # Try to load LoRA config from lora_config.json
@@ -283,7 +283,7 @@ def run_inference(text, prompt_wav, prompt_text, lora_selection, cfg_scale, step
         # 加载模型
         try:
             print(f"Loading base model: {base_model_path}", file=sys.stderr)
-            load_model(base_model_path)
+            load_model(base_model_path, lora_selection)
             if lora_selection and lora_selection != "None":
                 print(f"Model loaded for LoRA: {lora_selection}", file=sys.stderr)
         except Exception as e:
