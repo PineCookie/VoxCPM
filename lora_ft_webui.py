@@ -925,7 +925,7 @@ with gr.Blocks(title="VoxCPM LoRA WebUI", theme=gr.themes.Soft(), css=custom_css
 
                     with gr.Row():
                         lora_rank = gr.Number(label="🎯 LoRA Rank", value=32, precision=0, elem_classes="input-field")
-                        lora_alpha = gr.Number(label="⚖️ LoRA Alpha", value=16, precision=0, elem_classes="input-field")
+                        lora_alpha = gr.Number(label="⚖️ LoRA Alpha", value=32, precision=0, elem_classes="input-field")
                         save_interval = gr.Number(
                             label="💾 保存间隔 (Steps)", value=1000, precision=0, elem_classes="input-field"
                         )
@@ -949,7 +949,8 @@ with gr.Blocks(title="VoxCPM LoRA WebUI", theme=gr.themes.Soft(), css=custom_css
                             warmup_steps = gr.Number(label="warmup_steps", value=100, precision=0)
                         with gr.Row():
                             max_steps = gr.Number(label="最大步数 (max_steps, 0→默认num_iters)", value=0, precision=0)
-                            sample_rate = gr.Number(label="采样率 (sample_rate)", value=44100, precision=0)
+                            sample_rate = gr.Number(label="采样率 (sample_rate)", value=detect_sample_rate(
+                                default_pretrained_path) or 44100, precision=0)
                             max_grad_norm = gr.Number(label="梯度裁剪 (max_grad_norm, 0=关闭)", value=1.0)
                         with gr.Row():
                             tensorboard_path = gr.Textbox(label="Tensorboard 路径 (可选)", value="")
@@ -1304,4 +1305,4 @@ with gr.Blocks(title="VoxCPM LoRA WebUI", theme=gr.themes.Soft(), css=custom_css
 if __name__ == "__main__":
     # Ensure lora directory exists
     os.makedirs("lora", exist_ok=True)
-    app.queue().launch(server_name="0.0.0.0", server_port=7860)
+    app.queue().launch(server_name="127.0.0.1", server_port=7860)
