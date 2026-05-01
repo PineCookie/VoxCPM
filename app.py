@@ -257,7 +257,20 @@ class VoxCPMDemo:
 
         self.optimize = optimization
         self.lora_config = lora_config
-        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(self._model_id, optimize=self.optimize, lora_config=self.lora_config)
+        
+        # Always load without optimization first, then reapply to avoid
+        # torch.compile graph incompatibility issues when LoRA config changes
+        self.voxcpm_model = voxcpm.VoxCPM.from_pretrained(
+            self._model_id, 
+            optimize=False, 
+            lora_config=self.lora_config
+        )
+        
+        # Reapply triton optimization if enabled
+        if optimization:
+            print("Applying triton optimization...", file=sys.stderr)
+            self.voxcpm_model.tts_model.optimize(disable=False)
+        
         logger.info("Model loaded successfully.")
         return self.voxcpm_model
 
