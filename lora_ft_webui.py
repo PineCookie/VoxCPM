@@ -221,6 +221,38 @@ def get_default_lora_config():
     )
 
 
+def format_lora_config_display(lora_selection: str) -> str:
+    """Format LoRA config for display. Returns formatted string or message if no config."""
+    if not lora_selection or lora_selection == "None":
+        return "No LoRA selected. Using base model."
+    
+    full_lora_path = os.path.join("lora", lora_selection)
+    lora_cfg, base_model = load_lora_config_from_checkpoint(full_lora_path)
+    
+    if lora_cfg is None:
+        return f"⚠️ No config found for '{lora_selection}'"
+    
+    # Format the config for display
+    config_text = f"📦 LoRA Config: {lora_selection}\n"
+    config_text += "─" * 50 + "\n"
+    config_text += f"Enable LM:     {lora_cfg.enable_lm}\n"
+    config_text += f"Enable DiT:    {lora_cfg.enable_dit}\n"
+    config_text += f"Enable Proj:   {lora_cfg.enable_proj}\n"
+    config_text += f"Rank (r):      {lora_cfg.r}\n"
+    config_text += f"Alpha:         {lora_cfg.alpha}\n"
+    config_text += f"Dropout:       {lora_cfg.dropout}\n"
+    config_text += "─" * 50 + "\n"
+    config_text += f"Target Modules (LM):\n"
+    config_text += "  • " + ", ".join(lora_cfg.target_modules_lm) + "\n"
+    config_text += f"Target Modules (DiT):\n"
+    config_text += "  • " + ", ".join(lora_cfg.target_modules_dit) + "\n"
+    if base_model:
+        config_text += "─" * 50 + "\n"
+        config_text += f"Base Model: {base_model}"
+    
+    return config_text
+
+
 def load_model(lora_selection: Optional[str] = None):
     global current_model
     global lora_config
@@ -1105,6 +1137,14 @@ with gr.Blocks(title="VoxCPM LoRA WebUI", theme=gr.themes.Soft(), css=custom_css
 
                     refresh_lora_btn = gr.Button("🔄 刷新模型列表", elem_classes="button-refresh", size="sm")
 
+                    lora_config_display = gr.Textbox(
+                        label="📋 LoRA 配置信息",
+                        value=format_lora_config_display("None"),
+                        interactive=False,
+                        elem_classes="input-field",
+                        lines=8,
+                    )
+
                     gr.Markdown("#### ⚙️ 生成参数")
 
                     cfg_scale = gr.Slider(
@@ -1165,9 +1205,14 @@ with gr.Blocks(title="VoxCPM LoRA WebUI", theme=gr.themes.Soft(), css=custom_css
                     else:
                         print(f"  - {ckpt_path}", file=sys.stderr)
 
-                return gr.update(choices=choices, value="None")
+                return gr.update(choices=choices, value="None"), gr.update(value=format_lora_config_display("None"))
 
-            refresh_lora_btn.click(refresh_loras, outputs=[lora_select])
+            def update_lora_config_display(lora_selection):
+                return gr.update(value=format_lora_config_display(lora_selection))
+
+            refresh_lora_btn.click(refresh_loras, outputs=[lora_select, lora_config_display])
+            
+            lora_select.change(fn=update_lora_config_display, inputs=[lora_select], outputs=[lora_config_display])
 
             # Auto-recognize audio when uploaded
             prompt_wav.change(fn=recognize_audio, inputs=[prompt_wav], outputs=[prompt_text])

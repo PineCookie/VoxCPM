@@ -1,4 +1,4 @@
-from lora_ft_webui import get_default_lora_config, load_lora_config_from_checkpoint, scan_lora_checkpoints
+from lora_ft_webui import get_default_lora_config, load_lora_config_from_checkpoint, scan_lora_checkpoints, format_lora_config_display
 import os
 import re
 import sys
@@ -456,6 +456,13 @@ def create_demo_interface(demo: VoxCPMDemo):
                     interactive=True,
                     elem_classes="input-field"
                 )
+                lora_config_display = gr.Textbox(
+                    label="LoRA Config Info",
+                    value=format_lora_config_display("None"),
+                    interactive=False,
+                    elem_classes="input-field",
+                    lines=8,
+                )
                 optimization = gr.Checkbox(
                     label="Enable Triton (if supported)",
                     value=True)
@@ -546,6 +553,13 @@ def create_demo_interface(demo: VoxCPMDemo):
             fn=_run_asr_if_needed,
             inputs=[show_prompt_text, reference_wav],
             outputs=[prompt_text],
+        )
+
+        # Update LoRA config display when selection changes
+        lora_select.change(
+            fn=lambda lora_sel: gr.update(value=format_lora_config_display(lora_sel)),
+            inputs=[lora_select],
+            outputs=[lora_config_display],
         )
 
         run_btn.click(
